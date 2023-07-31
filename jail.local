@@ -1,0 +1,8 @@
+[minecraft-nullping]
+enabled = true
+port = 25565
+filter = minecraft-nullping
+logpath = /var/log/minecraft/server.log
+maxretry = 5
+bantime = 600
+findtime = 600
