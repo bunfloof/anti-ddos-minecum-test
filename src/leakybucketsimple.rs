@@ -41,30 +41,30 @@ impl TokenBucket {
 }
 
 pub struct IpFilter {
-    whitelist: HashSet<String>,
-    blacklist: HashSet<String>,
+    allowlist: HashSet<String>,
+    denylist: HashSet<String>,
     reputation_list: HashMap<String, u32>,
 }
 
 impl IpFilter {
     pub fn new() -> Self {
         Self {
-            whitelist: HashSet::new(),
-            blacklist: HashSet::new(),
+            allowlist: HashSet::new(),
+            denylist: HashSet::new(),
             reputation_list: HashMap::new(),
         }
     }
 
     pub fn allow(&mut self, ip: String) {
-        self.whitelist.insert(ip);
+        self.allowlist.insert(ip);
     }
 
     pub fn block(&mut self, ip: String) {
-        self.blacklist.insert(ip);
+        self.denylist.insert(ip);
     }
 
     pub fn is_allowed(&self, ip: &str) -> bool {
-        self.whitelist.contains(ip) && !self.blacklist.contains(ip)
+        self.allowlist.contains(ip) && !self.denylist.contains(ip)
     }
 
     pub fn update_reputation(&mut self, ip: String, reputation: u32) {
