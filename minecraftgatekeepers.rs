@@ -6,6 +6,9 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use std::net::SocketAddr;
+use std::collections::HashSet;
+const BLACKLIST_DURATION: Duration = Duration::from_secs(60 * 60); // 1 hour for example
+
 
 const SERVER_PORT: u16 = 25565;
 const MAX_REQUESTS_PER_SECOND: u32 = 1000;
@@ -16,6 +19,29 @@ struct Client {
     stream: TcpStream,
     requests: u32,
     last_active: u64,
+}
+
+struct Denylist {
+    list: HashMap<String, u64>,
+}
+
+impl Denylist {
+    fn new() -> Self {
+        Self {
+            list: HashMap::new(),
+        }
+    }
+
+    fn add(&mut self, ip: String) {
+        self.list.insert(ip, now() + BLACKLIST_DURATION.as_secs());
+    }
+
+    fn is_denylisted(&self, ip: &String) -> bool {
+        match self.list.get(ip) {
+            Some(&end_time) => now() < end_time,
+            None => false,
+        }
+    }
 }
 
 impl Client {
@@ -36,8 +62,10 @@ fn now() -> u64 {
     since_the_epoch.as_secs()
 }
 
-async fn handle_client(mut client: Arc<Mutex<Client>>) -> std::io::Result<()> {
+async fn handle_client(denylist: Arc<Mutex<Denylist>>, mut client: Arc<Mutex<Client>>) -> std::io::Result<()> {
     let mut buffer = [0; 1024];
+    let mut handshake_received = false;
+    
     loop {
         let n = client.lock().unwrap().stream.read(&mut buffer).await?;
         if n == 0 {
@@ -54,20 +82,26 @@ async fn handle_client(mut client: Arc<Mutex<Client>>) -> std::io::Result<()> {
                 return Err(std::io::Error::new(std::io::ErrorKind::Other, "Rate limit exceeded"));
             }
 
-            // minecraft packet validation (fuck you gecko)
             let packet = parse_packet(&buffer);
             match packet {
                 Some(Packet::Handshake(version)) => {
-                    if version != EXPECTED_PROTOCOL_VERSION {
-                        return Err(std::io::Error::new(std::io::ErrorKind::Other, "Invalid handshake version"));
+                    if version != EXPECTED_PROTOCOL_VERSION || handshake_received {
+                        return Err(std::io::Error::new(std::io::ErrorKind::Other, "Invalid handshake version or handshake received twice"));
                     }
+                    handshake_received = true;
                 },
                 Some(Packet::Login(username)) => {
-                    if !is_valid_username(&username) {
-                        return Err(std::io::Error::new(std::io::ErrorKind::Other, "Invalid username"));
+                    if !is_valid_username(&username) || !handshake_received {
+                        return Err(std::io::Error::new(std::io::ErrorKind::Other, "Invalid username or handshake not received"));
                     }
                 },
                 _ => ()
+            }
+
+            if handshake_received {
+                if !denylist.lock().unwrap().is_denylisted(&client.ip) {
+                    denylist.lock().unwrap().add(client.ip.clone());
+                }
             }
         }
     }
